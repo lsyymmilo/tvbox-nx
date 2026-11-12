@@ -331,7 +331,8 @@ brls::Box* makeCard(const Vod& v, const std::string& api, bool withPoster) {
     return card;
 }
 
-void fillGrid(brls::ScrollingFrame* frame, const std::vector<Vod>& vods, const std::string& api) {
+// 只负责搭内容，往哪个 frame 里塞由调用方决定（塞之前要先清焦点，见 Home::swapGridContent）
+brls::Box* buildGridContent(const std::vector<Vod>& vods, const std::string& api) {
     brls::Box* content = new brls::Box(brls::Axis::COLUMN);
     content->setPadding(10, 4, 24, 10);
 
@@ -339,8 +340,7 @@ void fillGrid(brls::ScrollingFrame* frame, const std::vector<Vod>& vods, const s
         brls::Label* empty = makeLabel("这个分类没有数据", 20, colDim());
         empty->setMargins(20, 20, 0, 0);
         content->addView(empty);
-        frame->setContentView(content);
-        return;
+        return content;
     }
 
     brls::Box* row = nullptr;
@@ -353,7 +353,7 @@ void fillGrid(brls::ScrollingFrame* frame, const std::vector<Vod>& vods, const s
         bool withPoster = ((int)i < kMaxPosters);
         row->addView(makeCard(vods[i], api, withPoster));
     }
-    frame->setContentView(content);
+    return content;
 }
 
 // ------------------------------------------------------------------ 首页（侧栏 + 海报墙）
@@ -366,8 +366,26 @@ struct Home {
     brls::ScrollingFrame* grid    = nullptr;
     brls::Label* title            = nullptr;
     brls::Label* hint             = nullptr;
+    brls::Label* srcLabel         = nullptr;
+    brls::Label* errLabel         = nullptr;
+    brls::Button* sourceBtn       = nullptr;   // 稳定焦点锚点：永不随内容重建被销毁
+    brls::Box* catList            = nullptr;   // 分类按钮容器，只换它的子控件
 
     std::string api() const { return state().hasSite() ? state().site().api : std::string(); }
+
+    // 任何 clearViews / setContentView 之前，先把焦点挪到不会销毁的按钮上。
+    // 否则 Application::currentFocus 与祖先的 lastFocusedView 会指向已被 delete 的控件，
+    // 下一次 giveFocus 就会在已释放对象上执行 onFocusLost（真机 2168-0001 Instruction Abort）。
+    void parkFocus() {
+        if (sourceBtn) brls::Application::giveFocus(sourceBtn);
+    }
+
+    // 换海报墙内容：先清掉 frame 上可能悬垂的 lastFocusedView，再换 contentView
+    void swapGridContent(brls::Box* content) {
+        if (!grid) return;
+        grid->setLastFocusedView(nullptr);
+        grid->setContentView(content);
+    }
 
     void loadCategory(long id, const std::string& name) {
         if (title) title->setText(name);
@@ -386,10 +404,14 @@ struct Home {
             return;
         }
         if (hint) hint->setText(std::to_string(vods.size()) + " 部   ·   共 " + std::to_string(pages) + " 页");
-        fillGrid(grid, vods, useApi);
+        parkFocus();                                   // 旧海报卡片要整批删掉，焦点先撤出
+        brls::Box* content = buildGridContent(vods, useApi);
+        swapGridContent(content);
+        brls::Application::giveFocus(content);         // 落到第一张卡片上
     }
 
-    void rebuildSidebar() {
+    // 侧栏骨架：只在启动时搭一次。搜索/换源按钮留在这层，作为稳定的焦点落点
+    void buildSidebar() {
         brls::Box* content = new brls::Box(brls::Axis::COLUMN);
         content->setPadding(18, 14, 20, 16);
 
@@ -397,8 +419,7 @@ struct Home {
         logo->setMargins(0, 0, 6, 0);
         content->addView(logo);
 
-        std::string src = state().hasSite() ? state().site().name : "无可用源";
-        brls::Label* srcLabel = makeLabel("源: " + src, 14, colDim());
+        srcLabel = makeLabel("源: …", 14, colDim());
         srcLabel->setMargins(0, 0, 14, 0);
         content->addView(srcLabel);
 
@@ -457,7 +478,7 @@ struct Home {
         content->addView(search);
 
         // 换源：点开下级菜单，可以选本地配置文件，也可以从网络加载
-        brls::Button* sourceBtn = new brls::Button();
+        sourceBtn = new brls::Button();
         sourceBtn->setText("切换源");
         sourceBtn->setFontSize(18);
         sourceBtn->setWidth(200);
@@ -473,7 +494,25 @@ struct Home {
         catTitle->setMargins(0, 0, 8, 0);
         content->addView(catTitle);
 
-        // 分类按钮：点了就在右侧换海报墙，不跳页
+        catList = new brls::Box(brls::Axis::COLUMN);
+        catList->setWidthPercentage(100);
+        catList->setPadding(0, 0, 0, 0);
+        content->addView(catList);
+
+        errLabel = makeLabel("", 14, colDim(), false);
+        errLabel->setIsWrapping(true);
+        errLabel->setMargins(8, 0, 0, 0);
+        content->addView(errLabel);
+
+        sidebar->setContentView(content);
+    }
+
+    // 只换分类按钮和两行文字，骨架与焦点锚点不动
+    void refillCategories() {
+        if (!catList) return;
+        parkFocus();                    // 即将删掉的按钮可能带着焦点，先撤出
+        catList->clearViews();          // 顺带清掉 lastFocusedView，避免指向已删除控件
+
         const std::vector<Category>& cats = state().categories;
         for (size_t i = 0; i < cats.size(); ++i) {
             long id       = cats[i].id;
@@ -489,35 +528,31 @@ struct Home {
                 self->loadCategory(id, n);
                 return true;
             });
-            content->addView(b);
+            catList->addView(b);
         }
 
         if (cats.empty()) {
             brls::Label* e = makeLabel("分类接口没返回数据", 15, colDim());
             e->setMargins(0, 0, 8, 0);
-            content->addView(e);
+            catList->addView(e);
         }
 
-        if (!state().lastError.empty()) {
-            brls::Label* e = makeLabel(state().lastError, 14, colDim(), false);
-            e->setIsWrapping(true);
-            e->setMargins(8, 0, 0, 0);
-            content->addView(e);
-        }
-
-        sidebar->setContentView(content);
+        if (srcLabel)
+            srcLabel->setText("源: " + (state().hasSite() ? state().site().name : std::string("无可用源")));
+        if (errLabel) errLabel->setText(state().lastError);
     }
 
     // 用当前 state().config 重新拉分类、重建侧栏与海报墙（不重新读文件）
     void refreshSources() {
         AppState& st = state();
+        parkFocus();                    // 重建前先把焦点撤到稳定按钮上
         st.categories.clear();
         if (st.hasSite()) {
             CmsClient client(st.site().api);
             std::string err;
             client.fetchCategories(st.categories, err);
         }
-        rebuildSidebar();
+        refillCategories();
         if (!st.categories.empty()) {
             loadCategory(st.categories[0].id, st.categories[0].name);
         } else {
@@ -530,7 +565,7 @@ struct Home {
                                        18, colDim(), false);
             e->setIsWrapping(true);
             content->addView(e);
-            grid->setContentView(content);
+            swapGridContent(content);
         }
     }
 };
@@ -569,6 +604,9 @@ void applyConfigText(Home* home, const std::string& text, const std::string& fro
     logLine("source: applied, from=" + from + " sites=" + std::to_string(cfg.sites.size()) +
             " skippedSpiders=" + std::to_string(cfg.skippedSpiders));
     brls::Application::notify("已应用（" + from + "）：" + std::to_string(cfg.sites.size()) + " 个源");
+    // 顺序很关键：先把焦点从"即将被重建掉的控件"上撤走，再重建，最后才退页。
+    // 反过来的话 popActivity 会从 focusStack 里取出一个已 delete 的按钮去拿焦点 → 崩。
+    home->parkFocus();
     home->refreshSources();
     brls::Application::popActivity();
 }
@@ -752,7 +790,8 @@ brls::View* createRoot() {
         client.fetchCategories(st.categories, err);
         logLine("createRoot: categories=" + std::to_string(st.categories.size()));
     }
-    home->rebuildSidebar();
+    home->buildSidebar();
+    home->refillCategories();
     if (!st.categories.empty()) {
         home->loadCategory(st.categories[0].id, st.categories[0].name);
     }
