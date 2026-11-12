@@ -46,32 +46,45 @@ namespace {
 
 // ---------------------------------------------------------------- 页面构件
 
-brls::ScrollingFrame* newPage(const std::string& title) {
+// 一页 = 可滚动的壳 + 里面真正堆控件的 Box。
+// 这一版 borealis 有两个坑必须绕开：
+//   1) ScrollingFrame 自己 setPadding 直接抛异常（NO_PADDING），padding 得设在内容视图上；
+//   2) ScrollingFrame::addView 等价于 setContentView，是"替换"而不是"追加"，
+//      往它上面连续 addView 只会剩最后一个控件。
+struct Page {
+    brls::ScrollingFrame* frame = nullptr;
+    brls::Box* content          = nullptr;
+};
+
+Page newPage(const std::string& title) {
     logLine("newPage: " + title + " begin");
-    brls::ScrollingFrame* page = new brls::ScrollingFrame();
-    page->setPadding(30, 30, 30, 20);
+    Page page;
+    page.frame   = new brls::ScrollingFrame();
+    page.content = new brls::Box(brls::Axis::COLUMN);
+    page.content->setPadding(30, 30, 30, 20);
+    page.frame->setContentView(page.content);
 
     brls::Header* header = new brls::Header();
     header->setTitle(title);
-    page->addView(header);
+    page.content->addView(header);
     logLine("newPage: " + title + " header ok");
     return page;
 }
 
-void addInfo(brls::ScrollingFrame* page, const std::string& text) {
+void addInfo(Page& page, const std::string& text) {
     brls::Label* label = new brls::Label();
     label->setText(text);
     label->setMargins(0, 0, 12, 0);
-    page->addView(label);
+    page.content->addView(label);
 }
 
-void addSection(brls::ScrollingFrame* page, const std::string& text) {
+void addSection(Page& page, const std::string& text) {
     brls::Header* header = new brls::Header();
     header->setTitle(text);
-    page->addView(header);
+    page.content->addView(header);
 }
 
-void addRow(brls::ScrollingFrame* page, const std::string& text, std::function<void()> onClick) {
+void addRow(Page& page, const std::string& text, std::function<void()> onClick) {
     brls::Button* row = new brls::Button();
     row->setText(text);
     row->setMargins(0, 0, 14, 0);
@@ -79,7 +92,7 @@ void addRow(brls::ScrollingFrame* page, const std::string& text, std::function<v
         onClick();
         return true;
     });
-    page->addView(row);
+    page.content->addView(row);
 }
 
 void pushPage(brls::View* view) {
@@ -192,7 +205,7 @@ private:
 // ---------------------------------------------------------------- 详情页
 
 brls::View* buildDetail(const Vod& vod) {
-    brls::ScrollingFrame* page = newPage(vod.name);
+    Page page = newPage(vod.name);
 
     std::string meta = vod.year;
     if (!vod.area.empty()) meta += (meta.empty() ? "" : "  ") + vod.area;
@@ -202,7 +215,7 @@ brls::View* buildDetail(const Vod& vod) {
 
     if (vod.routes.empty()) {
         addInfo(page, "没有解析到播放串");
-        return page;
+        return page.frame;
     }
 
     for (size_t i = 0; i < vod.routes.size(); ++i) {
@@ -224,17 +237,17 @@ brls::View* buildDetail(const Vod& vod) {
             }
         }
     }
-    return page;
+    return page.frame;
 }
 
 // ---------------------------------------------------------------- 影片列表页
 
 brls::View* buildVodList(const std::string& title, const std::vector<Vod>& vods, const std::string& api) {
-    brls::ScrollingFrame* page = newPage(title);
+    Page page = newPage(title);
 
     if (vods.empty()) {
         addInfo(page, "这个分类没有数据");
-        return page;
+        return page.frame;
     }
 
     for (size_t i = 0; i < vods.size(); ++i) {
@@ -255,13 +268,13 @@ brls::View* buildVodList(const std::string& title, const std::vector<Vod>& vods,
             pushPage(buildDetail(full));
         });
     }
-    return page;
+    return page.frame;
 }
 
 // ---------------------------------------------------------------- 搜索页
 
 brls::View* buildSearch(const std::string& api) {
-    brls::ScrollingFrame* page = newPage("搜索");
+    Page page = newPage("搜索");
     std::string itemApi = api;
 
     addInfo(page, "按 A 打开系统键盘输入片名");
@@ -281,7 +294,7 @@ brls::View* buildSearch(const std::string& api) {
             },
             "搜索", "输入片名后确认", 32, "");
     });
-    return page;
+    return page.frame;
 }
 
 }  // namespace
@@ -324,7 +337,7 @@ brls::View* createRoot() {
     logLine("createRoot: config loaded, sites=" + std::to_string(st.config.sites.size()) +
             " skipped=" + std::to_string(st.config.skippedSpiders));
 
-    brls::ScrollingFrame* page = newPage("TVBox-NX");
+    Page page = newPage("TVBox-NX");
     logLine("createRoot: page created");
 
     std::string summary = st.hasSite()
@@ -366,7 +379,7 @@ brls::View* createRoot() {
                 brls::Application::notify("分类接口失败: " + err);
                 return;
             }
-            brls::ScrollingFrame* catsPage = newPage("分类");
+            Page catsPage = newPage("分类");
             if (cats.empty()) {
                 addInfo(catsPage, "这个源没有返回分类");
             }
@@ -375,7 +388,7 @@ brls::View* createRoot() {
                 std::string n = cats[k].name;
                 addRow(catsPage, n, [id, n]() { openCategory(id, n); });
             }
-            pushPage(catsPage);
+            pushPage(catsPage.frame);
         });
         addRow(page, "搜索", [api]() { pushPage(buildSearch(api)); });
     } else {
@@ -408,7 +421,7 @@ brls::View* createRoot() {
     });
 
     logLine("createRoot: done");
-    return page;
+    return page.frame;
 }
 
 }  // namespace tbx
