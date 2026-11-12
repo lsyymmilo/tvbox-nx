@@ -3,6 +3,8 @@
 
 #include <borealis.hpp>
 
+#include <vector>
+
 #include "player.hpp"
 #include "tvbox.hpp"
 
@@ -10,6 +12,7 @@ namespace tbx {
 
 struct AppState {
     Config config;
+    std::vector<Category> categories;   // 首页分类（按站源拉取一次）
     int siteIndex = 0;
     Player player;
     std::string configPath = "sdmc:/switch/tvbox-nx/config.json";
