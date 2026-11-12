@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "net.hpp"
+#include "log.hpp"
 
 namespace tbx {
 
@@ -46,12 +47,14 @@ namespace {
 // ---------------------------------------------------------------- 页面构件
 
 brls::ScrollingFrame* newPage(const std::string& title) {
+    logLine("newPage: " + title + " begin");
     brls::ScrollingFrame* page = new brls::ScrollingFrame();
     page->setPadding(30, 30, 30, 20);
 
     brls::Header* header = new brls::Header();
     header->setTitle(title);
     page->addView(header);
+    logLine("newPage: " + title + " header ok");
     return page;
 }
 
@@ -315,10 +318,14 @@ void openPlayer(const std::string& url, const std::string& title) {
 }
 
 brls::View* createRoot() {
+    logLine("createRoot: begin");
     AppState& st = state();
     st.loadConfig();
+    logLine("createRoot: config loaded, sites=" + std::to_string(st.config.sites.size()) +
+            " skipped=" + std::to_string(st.config.skippedSpiders));
 
     brls::ScrollingFrame* page = newPage("TVBox-NX");
+    logLine("createRoot: page created");
 
     std::string summary = st.hasSite()
                               ? ("当前源：" + st.site().name + "    共 " +
@@ -400,6 +407,7 @@ brls::View* createRoot() {
             "API 地址", "形如 https://host/api.php/provide/vod", 200, "https://");
     });
 
+    logLine("createRoot: done");
     return page;
 }
 

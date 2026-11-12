@@ -21,6 +21,11 @@ jobs:
             fi
             cmake -B build -DPLATFORM_SWITCH=ON -DCMAKE_BUILD_TYPE=Release
             cmake --build build --target tvbox-nx.nro -j$(nproc)
+            echo "=== romfs content check ==="
+            test -f build/resources/xml/views/header.xml -o -d build/resources/xml/views || { echo "!! borealis xml resources MISSING"; exit 1; }
+            du -sh build/resources
+            find build/resources -maxdepth 2 -type d | sort | head -30
+            ls -la build/*.nro build/*.elf
           '
 
       - name: Upload nro artifact
@@ -29,4 +34,12 @@ jobs:
         with:
           name: tvbox-nx-nro
           path: build/*.nro
+          if-no-files-found: warn
+
+      - name: Upload elf for crash symbolization
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tvbox-nx-elf
+          path: build/*.elf
           if-no-files-found: warn
