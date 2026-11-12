@@ -1,0 +1,13 @@
+{
+  "sites": [
+    {
+      "key": "replace_me",
+      "name": "换成你自己的站源",
+      "type": 1,
+      "api": "http://127.0.0.1:8899/api.php/provide/vod",
+      "searchable": 1,
+      "quickSearch": 1
+    }
+  ],
+  "parses": []
+}

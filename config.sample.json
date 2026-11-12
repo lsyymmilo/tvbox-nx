@@ -1,0 +1,27 @@
+{
+  "sites": [
+    {
+      "key": "mock",
+      "name": "本地模拟站",
+      "type": 1,
+      "api": "http://127.0.0.1:8899/api.php/provide/vod",
+      "searchable": 1,
+      "quickSearch": 1,
+      "filter": ""
+    },
+    {
+      "key": "csp_demo",
+      "name": "蜘蛛源（不可用于 NS）",
+      "type": 3,
+      "api": "csp_DemoSpider",
+      "searchable": 1
+    }
+  ],
+  "parses": [
+    {
+      "name": "通用解析",
+      "type": 1,
+      "url": "https://example.invalid/parse?url="
+    }
+  ]
+}

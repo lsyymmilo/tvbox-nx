@@ -1,0 +1,41 @@
+# 在 GitHub 上直接出 .nro：push 之后到 Actions 页面下载 artifact。
+# 用的是官方 devkitPro 容器，海外 runner 能正常访问 pkg.devkitpro.org，
+# 所以不需要本地装工具链，也不用管代理。
+name: build-nro
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: devkitpro/devkita64:latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: 安装 Switch 依赖
+        run: |
+          dkp-pacman -S --needed --noconfirm \
+            switch-glfw switch-curl switch-libmpv switch-cmake
+
+      - name: 拉取 borealis
+        run: |
+          if [ ! -f libs/borealis/CMakeLists.txt ]; then
+            git clone --depth 1 https://github.com/XITRIX/borealis.git libs/borealis
+          fi
+
+      - name: 编译
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j"$(nproc)"
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: tvbox-nx-nro
+          path: build/**/*.nro
+          if-no-files-found: error

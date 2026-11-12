@@ -1,0 +1,6 @@
+build/
+dist/
+tools/*.exe
+tools/_*
+*.log
+libs/borealis/
