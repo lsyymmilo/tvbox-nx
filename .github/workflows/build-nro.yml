@@ -1,12 +1,3 @@
-# 在 GitHub 上直接编出 .nro（不需要本机装工具链）
-#
-# 用官方 devkitpro/devkita64 容器。海外 runner 访问 pkg.devkitpro.org 正常，
-# 不存在国内那套 Cloudflare 403 的问题。
-#
-# 注意：这里刻意没有用作业级 container: 写法，而是 docker run。
-# 原因：作业级容器里跑 actions/checkout 这类 JS action 需要容器内有 node，
-# devkitA64 镜像没有 node，会直接报 node: not found。
-
 name: build-nro
 
 on:
@@ -23,12 +14,13 @@ jobs:
         run: |
           docker run --rm -v "$PWD:/src" -w /src devkitpro/devkita64:latest bash -lc '
             set -e
-            dkp-pacman -S --needed --noconfirm switch-glfw switch-curl switch-libmpv switch-cmake
-            if [ ! -f libs/borealis/CMakeLists.txt ]; then
+            export PKG_CONFIG_PATH=${DEVKITPRO}/portlibs/switch/lib/pkgconfig
+            dkp-pacman -S --needed --noconfirm devkitA64 libnx switch-dev switch-glfw switch-curl switch-libmpv switch-mesa switch-cmake
+            if [ ! -f libs/borealis/library/CMakeLists.txt ]; then
               git clone --depth 1 https://github.com/XITRIX/borealis.git libs/borealis
             fi
-            cmake -B build -DCMAKE_BUILD_TYPE=Release
-            cmake --build build -j$(nproc)
+            cmake -B build -DPLATFORM_SWITCH=ON -DCMAKE_BUILD_TYPE=Release
+            cmake --build build --target tvbox-nx.nro -j$(nproc)
           '
 
       - name: Upload nro artifact
@@ -36,5 +28,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: tvbox-nx-nro
-          path: build/**/*.nro
+          path: build/*.nro
           if-no-files-found: warn
