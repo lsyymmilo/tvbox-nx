@@ -98,4 +98,15 @@ bool readWholeFile(const std::string& path, std::string& out) {
     return true;
 }
 
+void ensureDir(const std::string& path) {
+    mkdir(path.c_str(), 0777);
+}
+
+bool writeWholeFile(const std::string& path, const std::string& data) {
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    if (!out) return false;
+    out.write(data.data(), (std::streamsize)data.size());
+    return out.good();
+}
+
 }  // namespace tbx

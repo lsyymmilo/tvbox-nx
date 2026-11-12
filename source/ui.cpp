@@ -6,6 +6,7 @@
 #include "ui.hpp"
 
 #include <GLFW/glfw3.h>
+#include <dirent.h>
 
 #include <functional>
 #include <memory>
@@ -357,6 +358,9 @@ void fillGrid(brls::ScrollingFrame* frame, const std::vector<Vod>& vods, const s
 
 // ------------------------------------------------------------------ 首页（侧栏 + 海报墙）
 
+struct Home;
+brls::View* buildSourcePage(Home* home);   // 换源页，定义在后面
+
 struct Home {
     brls::ScrollingFrame* sidebar = nullptr;
     brls::ScrollingFrame* grid    = nullptr;
@@ -452,24 +456,18 @@ struct Home {
         });
         content->addView(search);
 
-        // 换源
-        brls::Button* next = new brls::Button();
-        next->setText("切换源");
-        next->setFontSize(18);
-        next->setWidth(200);
-        next->setHeight(48);
-        next->setMargins(0, 0, 14, 0);
-        next->registerClickAction([](brls::View*) {
-            AppState& st = state();
-            if (st.config.sites.size() < 2) {
-                brls::Application::notify("配置里只有一个源");
-                return true;
-            }
-            st.siteIndex = (st.siteIndex + 1) % (int)st.config.sites.size();
-            brls::Application::notify("已切换到 " + st.site().name + "，重新打开本程序后生效");
+        // 换源：点开下级菜单，可以选本地配置文件，也可以从网络加载
+        brls::Button* sourceBtn = new brls::Button();
+        sourceBtn->setText("切换源");
+        sourceBtn->setFontSize(18);
+        sourceBtn->setWidth(200);
+        sourceBtn->setHeight(48);
+        sourceBtn->setMargins(0, 0, 14, 0);
+        sourceBtn->registerClickAction([this](brls::View*) {
+            brls::Application::pushActivity(new brls::Activity(buildSourcePage(this)));
             return true;
         });
-        content->addView(next);
+        content->addView(sourceBtn);
 
         brls::Label* catTitle = makeLabel("分类", 18, colText());
         catTitle->setMargins(0, 0, 8, 0);
@@ -510,9 +508,9 @@ struct Home {
         sidebar->setContentView(content);
     }
 
-    void reload() {
+    // 用当前 state().config 重新拉分类、重建侧栏与海报墙（不重新读文件）
+    void refreshSources() {
         AppState& st = state();
-        st.loadConfig();
         st.categories.clear();
         if (st.hasSite()) {
             CmsClient client(st.site().api);
@@ -527,7 +525,8 @@ struct Home {
             if (hint) hint->setText("没有可用分类");
             brls::Box* content = new brls::Box(brls::Axis::COLUMN);
             content->setPadding(20, 10, 0, 10);
-            brls::Label* e = makeLabel(st.hasSite() ? "这个源没有返回分类" : "没有可用站源，把 config.json 放到 sdmc:/switch/tvbox-nx/",
+            brls::Label* e = makeLabel(st.hasSite() ? "这个源没有返回分类"
+                                                   : "没有可用站源，点左侧「切换源」填一个地址",
                                        18, colDim(), false);
             e->setIsWrapping(true);
             content->addView(e);
@@ -535,6 +534,165 @@ struct Home {
         }
     }
 };
+
+// ------------------------------------------------------------------ 换源页
+
+// sdmc:/switch/tvbox-nx 下扫到的 .json（配置文件）
+std::vector<std::string> listLocalConfigs() {
+    std::vector<std::string> files;
+    DIR* dir = opendir("sdmc:/switch/tvbox-nx");
+    if (!dir) return files;
+    while (struct dirent* ent = readdir(dir)) {
+        std::string name = ent->d_name;
+        if (name.size() > 5 && name.compare(name.size() - 5, 5, ".json") == 0)
+            files.push_back(name);
+    }
+    closedir(dir);
+    return files;
+}
+
+// 让一份配置文本生效：解析 → 存成 config.json（下次开机沿用）→ 刷新界面 → 退回主界面
+void applyConfigText(Home* home, const std::string& text, const std::string& from) {
+    Config cfg;
+    std::string err;
+    if (!Config::fromText(text, cfg, err) || cfg.sites.empty()) {
+        brls::Application::notify("配置不可用: " + (err.empty() ? std::string("没有可用站源") : err));
+        return;
+    }
+
+    AppState& st = state();
+    st.config    = cfg;
+    st.siteIndex = 0;
+    st.lastError.clear();
+    ensureDir("sdmc:/switch/tvbox-nx");
+    writeWholeFile(st.configPath, text);   // 落地，下次开机直接读
+    logLine("source: applied, from=" + from + " sites=" + std::to_string(cfg.sites.size()) +
+            " skippedSpiders=" + std::to_string(cfg.skippedSpiders));
+    brls::Application::notify("已应用（" + from + "）：" + std::to_string(cfg.sites.size()) + " 个源");
+    home->refreshSources();
+    brls::Application::popActivity();
+}
+
+void applyConfigFile(Home* home, const std::string& path) {
+    std::string text;
+    if (!readWholeFile(path, text)) {
+        brls::Application::notify("读不到配置文件: " + path);
+        return;
+    }
+    applyConfigText(home, text, path);
+}
+
+brls::Button* menuButton(const std::string& text, float width = 620) {
+    brls::Button* b = new brls::Button();
+    b->setText(text);
+    b->setFontSize(19);
+    b->setWidth(width);
+    b->setHeight(56);
+    b->setMargins(0, 0, 12, 0);
+    return b;
+}
+
+brls::View* buildSourcePage(Home* home) {
+    brls::ScrollingFrame* page = new brls::ScrollingFrame();
+    brls::Box* content         = new brls::Box(brls::Axis::COLUMN);
+    content->setPadding(26, 40, 30, 30);
+    page->setContentView(content);
+
+    brls::Label* title = makeLabel("切换源", 28, colText());
+    title->setMargins(0, 0, 6, 0);
+    content->addView(title);
+
+    brls::Label* sub = makeLabel(
+        "可填单个 CMS 接口地址，也可给整份 TVBox 配置（json）。应用后会存成 "
+        "sdmc:/switch/tvbox-nx/config.json，下次开机直接沿用。", 15, colDim(), false);
+    sub->setIsWrapping(true);
+    sub->setMargins(0, 0, 18, 0);
+    content->addView(sub);
+
+    // ---- 从网络加载
+    brls::Button* fromNet = menuButton("从网络加载配置（输入 URL）");
+    fromNet->registerClickAction([home](brls::View*) {
+        brls::Application::getImeManager()->openForText(
+            [home](std::string url) {
+                if (url.empty()) return;
+                brls::Application::notify("下载配置中…");
+                HttpResult r = httpGet(url, 15);
+                if (!r.ok()) {
+                    brls::Application::notify(
+                        "下载失败: " + (r.error.empty() ? ("HTTP " + std::to_string(r.status)) : r.error));
+                    return;
+                }
+                if (r.body.size() < 64) {
+                    brls::Application::notify("下载内容太短，不像配置");
+                    return;
+                }
+                applyConfigText(home, r.body, "网络");
+            },
+            "配置地址", "TVBox 配置 json 的地址，或单个 .../api.php/provide/vod", 300, "https://");
+        return true;
+    });
+    content->addView(fromNet);
+
+    // ---- 直接输接口地址
+    brls::Button* fromApi = menuButton("直接输入 CMS 接口地址");
+    fromApi->registerClickAction([home](brls::View*) {
+        brls::Application::getImeManager()->openForText(
+            [home](std::string url) {
+                if (url.empty()) return;
+                applyConfigText(home, url, "接口地址");
+            },
+            "接口地址", "形如 https://host/api.php/provide/vod", 300, "https://");
+        return true;
+    });
+    content->addView(fromApi);
+
+    // ---- 本地配置文件：扫目录列出来
+    brls::Label* localTitle = makeLabel("本地配置文件", 20, colText());
+    localTitle->setMargins(8, 0, 8, 0);
+    content->addView(localTitle);
+
+    std::vector<std::string> files = listLocalConfigs();
+    if (files.empty()) {
+        brls::Label* e = makeLabel("sdmc:/switch/tvbox-nx/ 下没有 .json 文件", 15, colDim());
+        e->setMargins(0, 0, 10, 0);
+        content->addView(e);
+    }
+    for (size_t i = 0; i < files.size(); ++i) {
+        std::string path = "sdmc:/switch/tvbox-nx/" + files[i];
+        brls::Button* b  = menuButton(files[i], 500);
+        b->registerClickAction([home, path](brls::View*) {
+            applyConfigFile(home, path);
+            return true;
+        });
+        content->addView(b);
+    }
+
+    brls::Button* sample = menuButton("内置示例源（romfs:/config.sample.json）", 500);
+    sample->registerClickAction([home](brls::View*) {
+        applyConfigFile(home, "romfs:/config.sample.json");
+        return true;
+    });
+    content->addView(sample);
+
+    // ---- 手动输路径
+    brls::Button* fromPath = menuButton("手动输入本地文件路径");
+    fromPath->registerClickAction([home](brls::View*) {
+        brls::Application::getImeManager()->openForText(
+            [home](std::string path) {
+                if (path.empty()) return;
+                applyConfigFile(home, path);
+            },
+            "文件路径", "例如 sdmc:/switch/tvbox-nx/config.json", 300, "sdmc:/");
+        return true;
+    });
+    content->addView(fromPath);
+
+    brls::Label* backHint = makeLabel("按 B 返回", 14, colDim());
+    backHint->setMargins(12, 0, 0, 0);
+    content->addView(backHint);
+
+    return page;
+}
 
 }  // namespace
 

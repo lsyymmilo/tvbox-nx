@@ -22,4 +22,10 @@ std::string urlEncode(const std::string& text);
 // 读整个文件；失败返回 false
 bool readWholeFile(const std::string& path, std::string& out);
 
+// 覆盖写入文本文件；目录不存在时会尝试建 sdmc:/switch/tvbox-nx
+bool writeWholeFile(const std::string& path, const std::string& data);
+
+// 确保目录存在（只处理一级）
+void ensureDir(const std::string& path);
+
 }  // namespace tbx
